@@ -12,7 +12,8 @@ IMAGE_TYPE="standalone"
 ASIC_TYPE=""
 ASIC_PATH=""
 TARGET=""
-PRIVILEGED=""
+OPTS=""
+COMMAND="start"
 
 print-help() {
     echo
@@ -25,7 +26,10 @@ print-help() {
     echo "     ASIC to be tested"
     echo "  -t TARGET"
     echo "     Target device with this NPU"
+    echo "  -c [start|stop]"
+    echo "     Start or stop docker. Default (start)"
     echo "  -p Run Docker in --privileged mode"
+    echo "  -r Remove Docker after run"
     echo
     exit 0
 }
@@ -50,7 +54,14 @@ while [[ $# -gt 0 ]]; do
             shift
         ;;
         "-p")
-            PRIVILEGED="--privileged"
+            OPTS="$OPTS --privileged"
+        ;;
+        "-r")
+            OPTS="$OPTS --rm"
+        ;;
+        "-c")
+            COMMAND="$2"
+            shift
         ;;
     esac
     shift
@@ -95,7 +106,7 @@ fi
 print-start-options() {
     echo
     echo "==========================================="
-    echo "     SAI Challenger start options"
+    echo "     SAI Challenger ${COMMAND} options"
     echo "==========================================="
     echo
     echo " Docker image type  : ${IMAGE_TYPE}"
@@ -109,25 +120,41 @@ print-start-options() {
 
 trap print-start-options EXIT
 
-# Start Docker container
-if [ "${IMAGE_TYPE}" = "standalone" ]; then
-    docker run --name sc-${ASIC_TYPE}-${TARGET}-run \
-	-v $(pwd):/sai-challenger \
-	--cap-add=NET_ADMIN \
-	${PRIVILEGED} \
-	--device /dev/net/tun:/dev/net/tun \
-	-d sc-${ASIC_TYPE}-${TARGET}
-elif [ "${IMAGE_TYPE}" = "server" ]; then
-    docker run --name sc-server-${ASIC_TYPE}-${TARGET}-run \
-	--cap-add=NET_ADMIN \
-	${PRIVILEGED} \
-	--device /dev/net/tun:/dev/net/tun \
-	-d sc-server-${ASIC_TYPE}-${TARGET}
-else
-    docker run --name sc-client-run \
-	-v $(pwd):/sai-challenger \
-	--cap-add=NET_ADMIN \
-	--device /dev/net/tun:/dev/net/tun \
-	-d sc-client
-fi
+if [ "${COMMAND}" = "start" ]; then
 
+    # Start Docker container
+    if [ "${IMAGE_TYPE}" = "standalone" ]; then
+        docker run --name sc-${ASIC_TYPE}-${TARGET}-run \
+        -v $(pwd):/sai-challenger \
+        --cap-add=NET_ADMIN \
+        ${OPTS} \
+        --device /dev/net/tun:/dev/net/tun \
+        -d sc-${ASIC_TYPE}-${TARGET}
+    elif [ "${IMAGE_TYPE}" = "server" ]; then
+        docker run --name sc-server-${ASIC_TYPE}-${TARGET}-run \
+        --cap-add=NET_ADMIN \
+        ${OPTS} \
+        --device /dev/net/tun:/dev/net/tun \
+        -d sc-server-${ASIC_TYPE}-${TARGET}
+    else
+        docker run --name sc-client-run \
+        -v $(pwd):/sai-challenger \
+        --cap-add=NET_ADMIN \
+        --device /dev/net/tun:/dev/net/tun \
+        -d sc-client
+    fi
+
+elif [ "${COMMAND}" = "stop" ]; then
+
+    # Stop Docker container
+        if [ "${IMAGE_TYPE}" = "standalone" ]; then
+        docker stop sc-${ASIC_TYPE}-${TARGET}-run
+    elif [ "${IMAGE_TYPE}" = "server" ]; then
+        docker stop sc-server-${ASIC_TYPE}-${TARGET}-run
+    else
+        docker stop sc-client-run
+    fi
+
+else
+    echo "Unknown command \"${COMMAND}\". Supported: start|stop."
+fi

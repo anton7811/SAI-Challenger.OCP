@@ -20,6 +20,12 @@ Start SAI Challenger server:
 ./run.sh -i server -a trident2 -t saivs
 ```
 
+If you are using server docker on the same host you can run the following script for creating links between client and server dockers:
+```sh
+bash -c ./veth-create-host.sh sc-server-run sc-client-run
+```
+Where: _sc-server-run_ and _sc-client-run_ are docker names of SAI-Challenger server and client respectively.
+
 Run SAI Challenger testcases:
 ```sh
 ./exec.sh -i client pytest --asic trident2 --target saivs --sai-server=172.17.0.4 -v -k "test_l2_basic"
