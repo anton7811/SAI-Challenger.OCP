@@ -4,6 +4,7 @@ import time
 import json
 import os
 import pytest
+from functools import wraps
 
 
 class SaiObjType(Enum):
@@ -155,64 +156,100 @@ class SaiData:
 
 
 class Sai:
+    class Meta:
+        def __init__(self, config_path=None):
+            self.config_path = config_path if config_path is not None else "/etc/sai/sai.json"
+
+        def get_meta(self, obj_type=None):
+            try:
+                f = open(self.config_path, "r")
+                sai_str = f.read()
+                sai_json = json.loads(sai_str)
+            except IOError:
+                return None
+
+            if obj_type is not None:
+                if type(obj_type) == SaiObjType:
+                    obj_type = "SAI_OBJECT_TYPE_" + SaiObjType(obj_type).name
+                else:
+                    assert type(obj_type) == str
+                    assert obj_type.startswith("SAI_OBJECT_TYPE_")
+
+                for item in sai_json:
+                    if obj_type in item.values():
+                        return item
+                else:
+                    return None
+            return sai_json
+
+        def get_obj_attrs(self, sai_obj_type):
+            meta = self.get_meta(sai_obj_type)
+            if meta is None:
+                return []
+            return [(attr['name'], attr['properties']['type']) for attr in meta['attributes']]
+
+        def get_obj_attr_type(self, sai_obj_type, sai_obj_attr):
+            attrs = self.get_obj_attrs(sai_obj_type)
+            for attr in attrs:
+                if attr[0] == sai_obj_attr:
+                    return attr[1]
+            return None
 
     attempts = 40
 
-    def __init__(self, exec_params):
+    def __init__(self, exec_params: dict):
         self.server_ip = exec_params["server"]
+        self.server_port = exec_params.get("server_port", 6379)
+        self.main_redis_db_id = exec_params.get("main_db", 1)
+        self.loglevel_db_id = exec_params.get("loglevel_db", 3)
         self.loglevel = exec_params["loglevel"]
-        self.r = redis.Redis(host=self.server_ip, port=6379, db=1)
-        self.loglevel_db = redis.Redis(host=self.server_ip, port=6379, db=3)
+        self.r = redis.Redis(host=self.server_ip, port=self.server_port, db=self.main_redis_db_id)
+        self.loglevel_db = redis.Redis(host=self.server_ip, port=self.server_port, db=self.loglevel_db_id)
         self.cache = {}
         self.rec2vid = {}
 
-        self.client_mode = not os.path.isfile("/usr/bin/redis-server")
-        libsai = os.path.isfile("/usr/lib/libsai.so") or os.path.isfile("/usr/local/lib/libsai.so")
-        self.libsaivs = exec_params["saivs"] or (not self.client_mode and not libsai)
-        self.run_traffic = exec_params["traffic"] and not self.libsaivs
+        # `redis_accessible_locally` deprecated property used. Redis could be installed in other locations,
+        # maybe it has to be configured
+        self.client_mode = exec_params.get('client_mode', not self.redis_accessible_locally)
+
+        # `libsai_accessible_locally` deprecated property used. libsai could be installed in other locations,
+        # maybe it has to be configured
+        self.mock_mode = exec_params.get("saivs", not(self.client_mode or self.libsai_accessible_locally))
+
+        self.run_traffic = exec_params.get("traffic") and not self.mock_mode
         self.name = exec_params["asic"]
         self.target = exec_params["target"]
         self.sku = exec_params["sku"]
         self.asic_dir = exec_params["asic_dir"]
 
-    @staticmethod
-    def get_meta(obj_type=None):
-        try:
-            path = "/etc/sai/sai.json"
-            f = open(path, "r")
-            sai_str = f.read()
-            sai_json = json.loads(sai_str)
-        except IOError:
-            return None
+        self.meta = Sai.Meta(config_path=exec_params.get('sai_meta_config'))
 
-        if obj_type is not None:
-            if type(obj_type) == SaiObjType:
-                obj_type = "SAI_OBJECT_TYPE_" + SaiObjType(obj_type).name
-            else:
-                assert type(obj_type) == str
-                assert obj_type.startswith("SAI_OBJECT_TYPE_")
+    @wraps(Meta.get_meta)
+    def get_meta(self, *args, **kwargs):
+        return self.meta.get_meta(*args, **kwargs)
 
-            for item in sai_json:
-                if obj_type in item.values():
-                    return item
-            else:
-                return None
-        return sai_json
+    @wraps(Meta.get_obj_attrs)
+    def get_obj_attrs(self, *args, **kwargs):
+        return self.meta.get_obj_attrs(*args, **kwargs)
 
-    @staticmethod
-    def get_obj_attrs(sai_obj_type):
-        meta = Sai.get_meta(sai_obj_type)
-        if meta is None:
-            return []
-        return [(attr['name'], attr['properties']['type']) for attr in meta['attributes']]
+    @wraps(Meta.get_obj_attr_type)
+    def get_obj_attr_type(self, *args, **kwargs):
+        return self.meta.get_obj_attr_type(*args, **kwargs)
 
-    @staticmethod
-    def get_obj_attr_type(sai_obj_type, sai_obj_attr):
-        attrs = Sai.get_obj_attrs(sai_obj_type)
-        for attr in attrs:
-            if attr[0] == sai_obj_attr:
-                return attr[1]
-        return None
+    @property
+    def libsaivs(self):
+        """Deprecated"""
+        return self.mock_mode
+
+    @property
+    def libsai_accessible_locally(self):
+        """Deprecated"""
+        return os.path.isfile("/usr/lib/libsai.so") or os.path.isfile("/usr/local/lib/libsai.so")
+
+    @property
+    def redis_accessible_locally(self):
+        """Deprecated"""
+        return os.path.isfile("/usr/bin/redis-server")
 
     def asser_syncd_running(self, tout=30):
         for i in range(tout):
@@ -366,7 +403,7 @@ class Sai:
         attempts = self.attempts
 
         # Wait upto 3 mins for switch init on HW
-        if not self.libsaivs and obj.startswith("SAI_OBJECT_TYPE_SWITCH") and op == "Screate":
+        if not self.mock_mode and obj.startswith("SAI_OBJECT_TYPE_SWITCH") and op == "Screate":
             tout = 0.5
             attempts = 240
 

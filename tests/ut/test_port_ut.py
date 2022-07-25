@@ -2,7 +2,7 @@ import pytest
 from sai import SaiObjType
 from sai import Sai
 
-port_attrs = Sai.get_obj_attrs(SaiObjType.PORT)
+port_attrs = Sai.Meta().get_obj_attrs(SaiObjType.PORT)
 port_attrs_default = {}
 port_attrs_updated = {}
 

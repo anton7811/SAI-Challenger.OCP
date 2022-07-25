@@ -1,7 +1,8 @@
 import pytest
 from sai import Sai
 
-switch_attrs = Sai.get_obj_attrs("SAI_OBJECT_TYPE_SWITCH")
+switch_attrs = Sai.Meta().get_obj_attrs("SAI_OBJECT_TYPE_SWITCH")
+
 
 @pytest.mark.parametrize(
     "attr,attr_type",
